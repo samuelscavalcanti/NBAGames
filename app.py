@@ -1,44 +1,66 @@
-# app.py (AJUSTADO para servir o index.html)
-
 import os
 from datetime import datetime
 import requests
-from flask import Flask, jsonify, request, render_template # <-- Importar render_template
+from requests.exceptions import JSONDecodeError, RequestException
+from flask import Flask, jsonify, render_template 
 from flask_cors import CORS
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
-load_dotenv()
 
-# ... (Configurações de app, CORS, API Key) ...
+app = Flask(__name__) 
+CORS(app) 
 
-# ----------------------------------------------------
-# ROTA DE SERVIÇO: Renderiza o HTML
-# ----------------------------------------------------
+# ✅ NOVO TRECHO DE LEITURA (MAIS ROBUSTO)
+# ⚠️ Certifique-se de que o nome da variável no seu .env seja 'BALLDONTLIE_API_KEY'
+
+# Carrega o arquivo .env diretamente para um dicionário
+config = dotenv_values(".env")
+
+# Acessa a chave diretamente do dicionário de configuração
+BALLDONTLIE_API_KEY = config.get("BALLDONTLIE_API_KEY")
+BASE_URL = 'https://nba.balldontlie.io/v2' 
+
+if not BALLDONTLIE_API_KEY:
+    print("ERRO: A variável de ambiente BALLDONTLIE_API_KEY não está definida. Verifique o arquivo .env.")
+    exit(1)
+
+# ROTA 1: Rota Raiz (/)
 @app.route('/')
 def index():
-    # Flask procura automaticamente o arquivo em 'templates/index.html'
     return render_template('index.html')
 
-# ----------------------------------------------------
-# ROTA DA API: /api/games (Seu proxy)
-# ----------------------------------------------------
+
+# ROTA 2: API Proxy (/api/games)
 @app.route('/api/games', methods=['GET'])
 def get_nba_games():
-    # ... (Seu código existente para buscar a API Balldontlie) ...
-    # (Não precisa de alteração neste bloco)
-    today = datetime.now().strftime('%Y-%m-%d')
+    datetime.now().strftime('%Y-%m-%d')
     api_url = f"{BASE_URL}/games?dates[]={today}"
-    # ...
+    
     try:
         response = requests.get(
             api_url,
-            headers={'Authorization': BALDONTLIE_API_KEY, 'Content-Type': 'application/json'}
+            headers={
+                'Authorization': BALLDONTLIE_API_KEY, 
+                'Content-Type': 'application/json'
+            }
         )
-        response.raise_for_status()
-        return jsonify(response.json())
-    except requests.exceptions.RequestException as e:
-        return jsonify({'message': 'Falha ao buscar dados dos Jogos.'}), 500
+        
+        response.raise_for_status() 
+        
+        # ⚠️ TRATAMENTO DE ERRO CRÍTICO (Corrige o 'AttributeError' e o 'JSONDecodeError')
+        try:
+            return jsonify(response.json())
+        except JSONDecodeError:
+            # Não acessamos response.status diretamente aqui para evitar o novo erro
+            print(f"AVISO: A API retornou Status OK (200), mas sem dados JSON válidos (Sem jogos hoje?). Retornando lista vazia.")
+            return jsonify({'data': []}), 200 
+            
+    except RequestException as e:
+        print(f"ERRO DE REQUISIÇÃO: {e}")
+        return jsonify({
+            'message': 'Falha ao buscar dados dos Jogos. (Verifique a API Key)',
+            'details': str(e)
+        }), 500
 
 if __name__ == '__main__':
-    # O servidor Flask será a porta de entrada da sua aplicação
     app.run(debug=True, port=5000)
