@@ -8,7 +8,27 @@
 </head>
 <body>
     <h1>TESTE</h1>
+    <h2 id="selected-date" style="text-align:center; font-weight: normal; margin-top: 8px;">Jogos de hoje</h2>
+
+    <div style="text-align:center; margin: 20px 0;">
+        <label for="date-picker">Escolher data:</label>
+        <input type="date" id="date-picker" />
+        <button id="fetch-date-btn">Buscar</button>
+        <button id="today-btn">Hoje</button>
+        <button id="reload-btn" style="margin-left: 20px;">Recarregar</button>
+    </div>
+
     <div class="games-grid" id="games-grid">
+    </div>
+
+    <div style="max-width:900px; margin: 24px auto; text-align:left;">
+        <h3 style="text-align:center;">Debug (resposta da API)</h3>
+        <pre id="debug-output" style="background:#f7f7f7; border:1px solid #ddd; padding:12px; height:180px; overflow:auto; white-space:pre-wrap;"></pre>
+    </div>
+
+    <h2 style="text-align:center; margin-top: 32px;">Tabela da NBA (Standings)</h2>
+    <div id="standings-container" style="max-width:900px; margin: 0 auto;">
+        <!-- A tabela será inserida aqui dinamicamente -->
     </div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
