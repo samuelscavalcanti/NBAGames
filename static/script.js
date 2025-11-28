@@ -17,43 +17,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 url = `${BACKEND_URL}?date=${encodeURIComponent(dateIso)}`;
             }
 
-              console.log('Fetching from:', url);
-              // write debug area if present
-              try { document.getElementById('debug-output').textContent = 'Fetching from: ' + url + '\n'; } catch(e) {}
             // A requisição agora vai para o seu servidor Python/Flask
             const response = await fetch(url);
             
-              console.log('Response status:', response.status);
-              try { document.getElementById('debug-output').textContent += 'Response status: ' + response.status + '\n'; } catch(e) {}
             if (!response.ok) {
                  throw new Error(`Erro de rede ou no servidor! Status: ${response.status}`);
             }
             
             const data = await response.json();
-              console.log('Data received:', data);
-              try { document.getElementById('debug-output').textContent += 'Data received: ' + JSON.stringify(data, null, 2) + '\n'; } catch(e) {}
             
             // A resposta do backend retorna 'data' (games) e opcionalmente 'standings'.
             gamesToday = data.data || [];
             standingsData = data.standings || [];
-            
-            console.log('Games:', gamesToday.length, 'Standings:', standingsData.length);
-            try { document.getElementById('debug-output').textContent += 'Games: ' + gamesToday.length + ' Standings: ' + standingsData.length + '\n'; } catch(e) {}
             
         } catch (error) {
             console.error('Erro ao buscar jogos:', error);
             gamesGrid.innerHTML = `
                 <p style="color: red; text-align: center;">Falha ao carregar os jogos. Verifique se o backend está rodando em ${BACKEND_URL}</p>
             `;
-            try { document.getElementById('debug-output').textContent += 'Fetch error: ' + String(error) + '\n'; } catch(e) {}
             // Em caso de erro, continuará e exibirá mensagem na tela
         }
         
         displayGames(gamesToday);
         displayStandings(standingsData);
     }
-
-    // script.js (Substituir a função existente)
 
     function getField(obj, names) {
         for (const n of names) {
@@ -183,14 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
         datePicker.value = '';
         fetchNBAGames();
     });
-
-    // Botão recarregar: recarrega a página inteira
-    const reloadBtn = document.getElementById('reload-btn');
-    if (reloadBtn) {
-        reloadBtn.addEventListener('click', () => {
-            location.reload();
-        });
-    }
 
     // Busca inicial: hoje
     fetchNBAGames();
