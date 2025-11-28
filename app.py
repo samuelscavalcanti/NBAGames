@@ -4,8 +4,8 @@ import math
 import numpy as np
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
-# ⚠️ CORREÇÃO FINAL: Usaremos ScoreboardV2, que é mais estável e confiável
-from nba_api.stats.endpoints import ScoreboardV2
+# Endpoints para jogos: ScoreboardV2 (próximos/atuais) e LeagueGameFinder (histórico com placares)
+from nba_api.stats.endpoints import ScoreboardV2, LeagueGameFinder
 
 # Tentativa de importar diferentes endpoints de standings, conforme disponibilidade
 StandingsEndpoint = None
@@ -56,43 +56,135 @@ def get_nba_games():
                     # YYYY-MM-DD -> converte para MM/DD/YYYY
                     parsed = datetime.fromisoformat(query_date)
                     today_date = parsed.strftime('%m/%d/%Y')
+                    query_date_iso = parsed.strftime('%m/%d/%Y')
                 else:
                     # assume já MM/DD/YYYY
                     datetime.strptime(query_date, '%m/%d/%Y')
                     today_date = query_date
+                    query_date_iso = query_date
             except Exception:
                 # fallback para hoje se parsing falhar
                 today_date = datetime.now().strftime('%m/%d/%Y')
+                query_date_iso = today_date
         else:
             # default: hoje
             today_date = datetime.now().strftime('%m/%d/%Y')
+            query_date_iso = today_date
 
-        # 2. Chama o endpoint ScoreboardV2 com a data determinada
-        schedule = ScoreboardV2(game_date=today_date)
-        
-        # 3. Converte o DataFrame dos jogos (o primeiro da lista)
-        games_df = schedule.get_data_frames()[0]
-        games_list = games_df.to_dict('records')
-
-        # Enriquece os jogos com o nome do time (mapeia IDs para nomes)
+        # 2. Tenta primeiro buscar com LeagueGameFinder (tem placares para jogos finalizados)
+        games_list = []
         try:
-            from nba_api.stats.static import teams as nba_teams
-            teams_list = nba_teams.get_teams()
-            team_map = {t['id']: t.get('full_name') for t in teams_list}
-            team_abbrev = {t['id']: t.get('abbreviation') for t in teams_list}
-            for g in games_list:
-                hid = g.get('HOME_TEAM_ID')
-                vid = g.get('VISITOR_TEAM_ID')
-                if hid in team_map:
-                    g['HOME_TEAM_NAME'] = team_map[hid]
-                    g['HOME_TEAM_ABBREV'] = team_abbrev.get(hid)
-                if vid in team_map:
-                    g['VISITOR_TEAM_NAME'] = team_map[vid]
-                    g['VISITOR_TEAM_ABBREV'] = team_abbrev.get(vid)
+            finder = LeagueGameFinder(date_from_nullable=query_date_iso, date_to_nullable=query_date_iso)
+            games_df = finder.get_data_frames()[0]
+            
+            if len(games_df) > 0:
+                # LeagueGameFinder retorna 1 linha por time (2 linhas por jogo)
+                # Agrupa e combina em um dicionário por GAME_ID
+                games_by_id = {}
+                for _, row in games_df.iterrows():
+                    game_id = row['GAME_ID']
+                    matchup = row['MATCHUP']  # ex: "BOS vs. DET" ou "DET @ BOS"
+                    team_id = row['TEAM_ID']
+                    team_name = row['TEAM_NAME']
+                    team_abbrev = row.get('TEAM_ABBREVIATION', '')
+                    pts = int(row['PTS'])
+                    
+                    if game_id not in games_by_id:
+                        games_by_id[game_id] = {
+                            'GAME_ID': game_id,
+                            'GAME_DATE_EST': row['GAME_DATE'],
+                            'MATCHUP': matchup,
+                            'GAME_STATUS_ID': 2,  # LeagueGameFinder sempre retorna jogos finalizados
+                            'GAME_STATUS_TEXT': 'Final',
+                            'PTS_HOME': None,
+                            'PTS_AWAY': None,
+                            'HOME_TEAM_ID': None,
+                            'VISITOR_TEAM_ID': None,
+                            'HOME_TEAM_NAME': None,
+                            'VISITOR_TEAM_NAME': None,
+                            'HOME_TEAM_ABBREV': None,
+                            'VISITOR_TEAM_ABBREV': None,
+                        }
+                    
+                    # Identifica se é home ou away baseado no MATCHUP
+                    # Ex: "DET @ BOS" -> DET é visitante (@), BOS é home
+                    # Ex: "BOS vs. DET" -> BOS é home (vs), DET é visitante
+                    if ' @ ' in matchup:
+                        # Time antes do @ é visitante, time depois é home
+                        parts = matchup.split(' @ ')
+                        if team_abbrev == parts[0].strip():
+                            # É visitante
+                            games_by_id[game_id]['VISITOR_TEAM_ID'] = team_id
+                            games_by_id[game_id]['VISITOR_TEAM_NAME'] = team_name
+                            games_by_id[game_id]['VISITOR_TEAM_ABBREV'] = team_abbrev
+                            games_by_id[game_id]['PTS_AWAY'] = pts
+                        else:
+                            # É home
+                            games_by_id[game_id]['HOME_TEAM_ID'] = team_id
+                            games_by_id[game_id]['HOME_TEAM_NAME'] = team_name
+                            games_by_id[game_id]['HOME_TEAM_ABBREV'] = team_abbrev
+                            games_by_id[game_id]['PTS_HOME'] = pts
+                    else:
+                        # TEAM vs. OPPONENT - team before "vs" é home
+                        parts = matchup.split(' vs')
+                        if team_abbrev == parts[0].strip():
+                            # É home
+                            games_by_id[game_id]['HOME_TEAM_ID'] = team_id
+                            games_by_id[game_id]['HOME_TEAM_NAME'] = team_name
+                            games_by_id[game_id]['HOME_TEAM_ABBREV'] = team_abbrev
+                            games_by_id[game_id]['PTS_HOME'] = pts
+                        else:
+                            # É visitante
+                            games_by_id[game_id]['VISITOR_TEAM_ID'] = team_id
+                            games_by_id[game_id]['VISITOR_TEAM_NAME'] = team_name
+                            games_by_id[game_id]['VISITOR_TEAM_ABBREV'] = team_abbrev
+                            games_by_id[game_id]['PTS_AWAY'] = pts
+                
+                games_list = list(games_by_id.values())
+        
         except Exception as e:
-            print(f"WARN: não foi possível mapear nomes dos times: {e}")
+            print(f"INFO: LeagueGameFinder não encontrou jogos para {query_date_iso}, tentando ScoreboardV2: {e}")
+        
+        # 3. Se LeagueGameFinder não retornar resultados, usa ScoreboardV2 (para jogos futuros)
+        if len(games_list) == 0:
+            schedule = ScoreboardV2(game_date=today_date)
+            games_df = schedule.get_data_frames()[0]
+            games_list = games_df.to_dict('records')
 
-        # 4. Opcional: busca a tabela de standings (tenta vários endpoints disponíveis)
+            # Enriquece os jogos com o nome do time (mapeia IDs para nomes)
+            try:
+                from nba_api.stats.static import teams as nba_teams
+                teams_list = nba_teams.get_teams()
+                team_map = {t['id']: t.get('full_name') for t in teams_list}
+                team_abbrev = {t['id']: t.get('abbreviation') for t in teams_list}
+                for g in games_list:
+                    hid = g.get('HOME_TEAM_ID')
+                    vid = g.get('VISITOR_TEAM_ID')
+                    if hid in team_map:
+                        g['HOME_TEAM_NAME'] = team_map[hid]
+                        g['HOME_TEAM_ABBREV'] = team_abbrev.get(hid)
+                    if vid in team_map:
+                        g['VISITOR_TEAM_NAME'] = team_map[vid]
+                        g['VISITOR_TEAM_ABBREV'] = team_abbrev.get(vid)
+            except Exception as e:
+                print(f"WARN: não foi possível mapear nomes dos times: {e}")
+        else:
+            # Se usou LeagueGameFinder, tenta enriquecer com abreviaturas também
+            try:
+                from nba_api.stats.static import teams as nba_teams
+                teams_list = nba_teams.get_teams()
+                team_abbrev = {t['id']: t.get('abbreviation') for t in teams_list}
+                for g in games_list:
+                    hid = g.get('HOME_TEAM_ID')
+                    vid = g.get('VISITOR_TEAM_ID')
+                    if hid in team_abbrev:
+                        g['HOME_TEAM_ABBREV'] = team_abbrev.get(hid)
+                    if vid in team_abbrev:
+                        g['VISITOR_TEAM_ABBREV'] = team_abbrev.get(vid)
+            except Exception as e:
+                print(f"WARN: não foi possível mapear abreviaturas dos times: {e}")
+        
+        # 4. Busca a tabela de standings (tenta vários endpoints disponíveis)
         standings_list = []
         if StandingsEndpoint is not None:
             try:
